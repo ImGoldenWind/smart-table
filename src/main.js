@@ -10,55 +10,62 @@ import {initPagination} from "./components/pagination.js";
 import {initSorting} from "./components/sorting.js";
 import {initFiltering} from "./components/filtering.js";
 import {initSearching} from "./components/searching.js";
-import {getPages, createPage} from "./lib/utils.js";
 
-// Исходные данные для render()
-const {data, ...indexes} = initData(sourceData);
+// инициализация API
+const api = initData(sourceData);
 
-// Инициализация таблицы с search, header, filter и pagination
+// инициализация таблицы
 const sampleTable = initTable({
     tableTemplate: 'table',
     rowTemplate: 'row',
-    before: ['search', 'header', 'filter'],  // search → фильтр → сортировка
+    before: ['search', 'header', 'filter'],
     after: ['pagination']
 }, render);
 
-// Инициализация поиска
-const applySearching = initSearching(sampleTable.search.elements, 'search');
+// поиск
+const applySearching = initSearching(
+    sampleTable.search.elements,
+    'search'
+);
 
-// Инициализация фильтрации
-const applyFiltering = initFiltering(sampleTable.filter.elements, {
-    searchBySeller: indexes.sellers,
-    searchByCustomer: indexes.customers
-});
+// фильтрация
+const {applyFiltering, updateIndexes} = initFiltering(
+    sampleTable.filter.elements
+);
 
-// Инициализация сортировки
+// сортировка
 const applySorting = initSorting([
     sampleTable.header.elements.sortByDate,
     sampleTable.header.elements.sortByTotal
 ]);
 
-// Инициализация пагинации
-const applyPagination = initPagination(
+// пагинация
+const {applyPagination, updatePagination} = initPagination(
     sampleTable.pagination.elements,
     (el, page, isCurrent) => {
         const input = el.querySelector('input');
         const label = el.querySelector('span');
+
         input.value = page;
         input.checked = isCurrent;
         label.textContent = page;
+
         return el;
     }
 );
 
 /**
- * Сбор и обработка полей из таблицы
- * @returns {Object}
+ * Сбор состояния формы
  */
 function collectState() {
-    const state = processFormData(new FormData(sampleTable.container));
-    const rowsPerPage = parseInt(state.rowsPerPage);      
-    const page = parseInt(state.page ?? 1);               
+
+    const state = processFormData(
+        new FormData(sampleTable.container)
+    );
+
+    const rowsPerPage = parseInt(state.rowsPerPage);
+    const page = parseInt(state.page ?? 1);
+
     return {
         ...state,
         rowsPerPage,
@@ -67,32 +74,51 @@ function collectState() {
 }
 
 /**
- * Перерисовка состояния таблицы при любых изменениях
- * @param {HTMLButtonElement?} action
+ * Перерисовка таблицы
  */
-function render(action) {
-    let state = collectState();       // состояние полей
-    let result = [...data];           // копия исходных данных
+async function render(action) {
 
-    // 1. Поиск
-    result = applySearching(result, state, action);
+    let state = collectState();
+    let query = {};
 
-    // 2. Фильтрация
-    result = applyFiltering(result, state, action);
+    // поиск
+    query = applySearching(query, state, action);
 
-    // 3. Сортировка
-    result = applySorting(result, state, action);
+    // фильтрация
+    query = applyFiltering(query, state, action);
 
-    // 4. Пагинация
-    result = applyPagination(result, state, action);
+    // сортировка
+    query = applySorting(query, state, action);
 
-    // 5. Вывод в таблицу
-    sampleTable.render(result);
+    // пагинация
+    query = applyPagination(query, state, action);
+
+    // запрос к серверу
+    const { total, items } = await api.getRecords(query);
+
+    // обновление пагинатора
+    updatePagination(total, query);
+
+    // рендер строк таблицы
+    sampleTable.render(items);
 }
 
-// Подключение таблицы к DOM
+// подключаем таблицу к DOM
 const appRoot = document.querySelector('#app');
 appRoot.appendChild(sampleTable.container);
 
-// Первоначальный рендер
-render();
+/**
+ * инициализация приложения
+ */
+async function init() {
+
+    const indexes = await api.getIndexes();
+
+    // заполнение select продавцов
+    updateIndexes(sampleTable.filter.elements, {
+        searchBySeller: indexes.sellers
+    });
+}
+
+// запуск
+init().then(render);
